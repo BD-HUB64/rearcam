@@ -1,57 +1,100 @@
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#000000">
 <title>후방카메라</title>
 <style>
-*{box-sizing:border-box}
-html,body{margin:0;height:100%;background:#000;color:#dfe8f5;font:16px -apple-system,"Apple SD Gothic Neo",sans-serif}
-#v{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
-#st{position:fixed;left:0;right:0;top:calc(10px + env(safe-area-inset-top));text-align:center;color:#ffd58a;text-shadow:0 1px 3px #000;z-index:3}
-#bar{position:fixed;left:0;right:0;bottom:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center;flex-wrap:wrap;background:linear-gradient(transparent,rgba(0,0,0,.85) 40%);z-index:4}
-button{font:inherit;color:#e8f0ff;background:#1c2740;border:1px solid #3a4b70;border-radius:10px;padding:12px 18px}
-button.big{background:#2c5da8;border-color:#6aa3ff;font-size:20px;padding:16px 28px}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#000;color:#dfe8f5;font:16px -apple-system,"Apple SD Gothic Neo",sans-serif;overflow:hidden}
+#stage{position:fixed;inset:0;background:#000}
+#v{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+#g{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#st{position:fixed;left:0;right:0;top:calc(10px + env(safe-area-inset-top));text-align:center;color:#ffd58a;text-shadow:0 1px 3px #000;z-index:3;pointer-events:none}
+#bar{position:fixed;left:0;right:0;bottom:0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center;flex-wrap:wrap;background:linear-gradient(transparent,rgba(0,0,0,.85) 40%);z-index:4;transition:opacity .25s}
+#bar.hide{opacity:0;pointer-events:none}
+button{font:inherit;color:#e8f0ff;background:#1c2740;border:1px solid #3a4b70;border-radius:10px;padding:12px 16px}
+button.on{background:#2c5da8;border-color:#6aa3ff}
+button.big{background:#2c5da8;border-color:#6aa3ff;font-size:22px;padding:18px 34px}
 </style></head><body>
-<img id="v" alt="">
+<div id="stage"><img id="v" alt=""><canvas id="g"></canvas></div>
 <div id="st">아래 [연결] 버튼을 누르세요</div>
 <div id="bar">
  <button class="big" id="go">연결</button>
- <button id="q" style="display:none">화면 작게/크게</button>
- <button id="m" style="display:none">좌우 반전</button>
+ <button id="bM" class="x" style="display:none">좌우 반전</button>
+ <button id="bF" class="x" style="display:none">상하 반전</button>
+ <button id="bG" class="x" style="display:none">가이드선</button>
+ <button id="q" class="x" style="display:none">화질 바꾸기</button>
 </div>
 <script>
 const SVC='6e400001-b5a3-f393-e0a9-e50e24dcca9e',IMG='6e400003-b5a3-f393-e0a9-e50e24dcca9e',CTL='6e400002-b5a3-f393-e0a9-e50e24dcca9e';
-const v=document.getElementById('v'),st=document.getElementById('st');
-let parts=[],expect=0,got=0,bad=0,size=0,frames=0,t0=Date.now(),ctl=null,mir=false,lvl=0;
-const LV=[[5,24],[3,20],[1,16]]; // 320x240 / 240x176 / 160x120
+const $=id=>document.getElementById(id);
+const v=$('v'),st=$('st'),bar=$('bar');
+let parts=[],expect=0,got=0,bad=0,frames=0,t0=Date.now(),ctl=null,dev=null,icH=null,mir=false,flip=false,guide=false,lvl=0,hideT=null,wl=null,manual=false,lastData=Date.now();
+const LV=[[5,24,'보통(320)'],[3,20,'작게(240) 빠름'],[1,16,'아주 작게(160) 가장 빠름'],[6,20,'크게(400) 느림']];
+function tf(){v.style.transform='scale('+(mir?-1:1)+','+(flip?-1:1)+')'}
+function drawG(){const c=$('g'),d=window.devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;c.width=w*d;c.height=h*d;const g=c.getContext('2d');g.scale(d,d);g.clearRect(0,0,w,h);if(!guide)return;
+ g.lineWidth=3;const bx0=w*.16,bx1=w*.84,tx0=w*.38,tx1=w*.62,by=h*.9,ty=h*.42;
+ g.strokeStyle='rgba(120,255,160,.9)';g.beginPath();g.moveTo(bx0,by);g.lineTo(tx0,ty);g.moveTo(bx1,by);g.lineTo(tx1,ty);g.stroke();
+ [[.85,'#ff5b5b'],[.65,'#ffd24a'],[.45,'#7dff9d']].forEach(([f,col])=>{const y=by-(by-ty)*(1-f),t=(by-y)/(by-ty),x0=bx0+(tx0-bx0)*t,x1=bx1+(tx1-bx1)*t;g.strokeStyle=col;g.beginPath();g.moveTo(x0,y);g.lineTo(x1,y);g.stroke()})}
 function onData(e){
-  const d=new Uint8Array(e.target.value.buffer);
+  lastData=Date.now();
+  const d=new Uint8Array(e.target.value.buffer,e.target.value.byteOffset,e.target.value.byteLength);
   const f=d[0];
   if(f===1){expect=d[1]|(d[2]<<8)|(d[3]<<16);got=d.length-4;parts=[d.slice(4)]}
   else if(f===0){got+=d.length-1;parts.push(d.slice(1))}
   else if(f===2){
-    if(got!==expect){bad++;parts=[];st.textContent='깨진 그림 버림 '+bad+'회';return}   // 중간에 빠진 조각이 있으면 보여 주지 않는다
+    if(got!==expect){bad++;parts=[];return}
     const b=new Blob(parts,{type:'image/jpeg'});parts=[];
     const u=URL.createObjectURL(b),old=v.src;v.src=u;if(old.startsWith('blob:'))setTimeout(()=>URL.revokeObjectURL(old),500);
     frames++;const s=(Date.now()-t0)/1000;
-    st.textContent='v2 초당 '+(frames/s).toFixed(1)+'장 (버린 그림 '+bad+')';
+    st.textContent='초당 '+(frames/s).toFixed(1)+'장';
     if(s>3){t0=Date.now();frames=0}
   }
 }
-document.getElementById('go').onclick=async()=>{
+async function wake(){try{if(navigator.wakeLock){wl=await navigator.wakeLock.request('screen')}}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&dev){wake();if(!dev.gatt.connected)reconnect()}});
+async function setup(){
+  const g=dev.gatt.server||dev.gatt,srv=await dev.gatt.connect(),s=await srv.getPrimaryService(SVC);
+  const ic=await s.getCharacteristic(IMG);ctl=await s.getCharacteristic(CTL);
+  if(icH)ic.removeEventListener('characteristicvaluechanged',icH);
+  icH=onData;ic.addEventListener('characteristicvaluechanged',icH);
+  await ic.startNotifications();
+  parts=[];lastData=Date.now();
+  try{await ctl.writeValue(new Uint8Array(LV[lvl]))}catch(e){}
+  st.textContent='연결됨';
+}
+let rec=false;
+async function reconnect(){
+  if(rec||manual)return;rec=true;
+  for(let i=1;i<=10&&!manual;i++){
+    st.textContent='끊김. 다시 연결 중… ('+i+')';
+    try{await setup();rec=false;return}catch(e){await new Promise(r=>setTimeout(r,1500))}
+  }
+  rec=false;st.textContent='연결 실패. [연결]을 눌러 주세요';$('go').style.display='';
+}
+$('go').onclick=async()=>{
+  manual=false;
   try{
     st.textContent='찾는 중…';
-    const dev=await navigator.bluetooth.requestDevice({filters:[{name:'RearCam'}],optionalServices:[SVC]});
-    dev.addEventListener('gattserverdisconnected',()=>{st.textContent='끊김. [연결]을 다시 누르세요'});
-    const g=await dev.gatt.connect(),s=await g.getPrimaryService(SVC);
-    const ic=await s.getCharacteristic(IMG);ctl=await s.getCharacteristic(CTL);
-    ic.addEventListener('characteristicvaluechanged',onData);
-    await ic.startNotifications();
-    st.textContent='연결됨';
-    document.getElementById('go').style.display='none';
-    document.getElementById('q').style.display='';document.getElementById('m').style.display='';
-  }catch(err){st.textContent='실패: '+err.message}
+    if(!dev){
+      dev=await navigator.bluetooth.requestDevice({filters:[{name:'RearCam'}],optionalServices:[SVC]});
+      dev.addEventListener('gattserverdisconnected',()=>{if(!manual)reconnect()});
+    }
+    await setup();wake();
+    $('go').style.display='none';document.querySelectorAll('.x').forEach(b=>b.style.display='');
+    showBar();
+  }catch(err){st.textContent='실패: '+err.message;if(dev){reconnect()}}
 };
-document.getElementById('q').onclick=()=>{if(!ctl)return;lvl=(lvl+1)%LV.length;ctl.writeValue(new Uint8Array(LV[lvl]))};
-document.getElementById('m').onclick=()=>{mir=!mir;v.style.transform='scaleX('+(mir?-1:1)+')'};
+// 영상이 4초 이상 안 들어오면 다시 연결
+setInterval(()=>{if(dev&&dev.gatt.connected&&Date.now()-lastData>4000&&!rec){try{dev.gatt.disconnect()}catch(e){}}},2000);
+$('bM').onclick=e=>{mir=!mir;e.target.classList.toggle('on',mir);tf()};
+$('bF').onclick=e=>{flip=!flip;e.target.classList.toggle('on',flip);tf()};
+$('bG').onclick=e=>{guide=!guide;e.target.classList.toggle('on',guide);drawG()};
+$('q').onclick=async e=>{lvl=(lvl+1)%LV.length;e.target.textContent=LV[lvl][2];if(ctl){try{await ctl.writeValue(new Uint8Array(LV[lvl]))}catch(x){}}};
+function showBar(){bar.classList.remove('hide');clearTimeout(hideT);hideT=setTimeout(()=>{if(dev)bar.classList.add('hide')},6000)}
+$('stage').addEventListener('click',showBar);bar.addEventListener('click',()=>{clearTimeout(hideT);hideT=setTimeout(()=>{if(dev)bar.classList.add('hide')},6000)});
+addEventListener('resize',drawG);drawG();
 if(!navigator.bluetooth){st.textContent='이 브라우저는 블루투스를 지원하지 않습니다. Bluefy 앱에서 여세요.'}
 </script></body></html>
