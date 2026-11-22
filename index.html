@@ -33,7 +33,7 @@ function onData(e){
     const b=new Blob(parts,{type:'image/jpeg'});parts=[];
     const u=URL.createObjectURL(b),old=v.src;v.src=u;if(old.startsWith('blob:'))setTimeout(()=>URL.revokeObjectURL(old),500);
     frames++;const s=(Date.now()-t0)/1000;
-    st.textContent='초당 '+(frames/s).toFixed(1)+'장';
+    st.textContent='v2 초당 '+(frames/s).toFixed(1)+'장 (버린 그림 '+bad+')';
     if(s>3){t0=Date.now();frames=0}
   }
 }
